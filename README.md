@@ -29,12 +29,12 @@
 # CMakeList.txt
 
 # 编译生成 libsharememory.so 动态库
-add_library(sharememory SHARED share_memory.h share_memory.cpp)
+add_library(sharememory SHARED src/share_memory.h src/share_memory.cpp)
 
 # 将共享内存加入项目
-add_executable(cpp_python 
-								main.cpp 
-								share_memory.cpp share_memory.h)
+add_executable(cpp_python
+        test.cpp
+        src/share_memory.cpp src/share_memory.h)
 ```
 
 使用方法：

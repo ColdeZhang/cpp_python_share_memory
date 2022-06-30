@@ -11,9 +11,9 @@ SET(CMAKE_PREFIX_PATH ${CMAKE_PREFIX_PATH} "${CMAKE_SOURCE_DIR}/external/opencv_
 find_package(OpenCV REQUIRED)
 
 
-add_executable(cpp_python main.cpp share_memory.cpp share_memory.h share2python.cpp)
+add_executable(cpp_python test.cpp cpp_src/share_memory.cpp cpp_src/share_memory.h)
 
-add_library(sharememory SHARED share_memory.h share_memory.cpp)
+add_library(sharememory SHARED src/share_memory.h src/share_memory.cpp)
 
 target_link_directories(cpp_python
         PRIVATE external/opencv_build/lib64)
