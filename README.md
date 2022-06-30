@@ -7,7 +7,7 @@
 
 因为所有进程共享同一块内存，共享内存在各种进程间通信方式中具有最高的效率。访问共享内存区域和访问进程独有的内存区域一样快，并不需要通过系统调用或者其它需要切入内核的过程来完成。同时它也避免了对数据的各种不必要的复制。
 
-![image-20220629164458970](https://s2.loli.net/2022/06/29/waldUnriNLyQVB7.png)
+![image-20220630215333671](https://s2.loli.net/2022/06/30/aNf3ThZxFCrRuA2.png)
 
 1. 共享内存是进程间共享数据的一种最快的方法。一个进程向共享的内存区域写入了数据，共享这个内存区域的所有进程就可以立刻看到其中的内容。
 2. 使用共享内存要注意的是多个进程之间对一个给定存储区访问的互斥。若一个进程正在向共享内存区写数据，则在它做完这一步操作前，别的进程不应当去读、写这些数据。
@@ -63,11 +63,11 @@ ShareImpl.PutShareBody((u_char *)image, image_size);
 ```
 ─┬	PyShareMemory
  │
- ├──		__init__.py
+ ├──	__init__.py
  │
- ├──		ShareMemory.py
+ ├──	ShareMemory.py
  │
- └──		libsharememory.so
+ └──	libsharememory.so
 ```
 
 模块调用示例：
