@@ -8,11 +8,30 @@ namespace ShareMem{
 
     ShareMemory::ShareMemory(key_t share_key){
         CreateShare(share_key);
+        // 开辟一个独立线程等待初始化完成
+        std::thread([this](){
+            while(true){
+                std::cout<<"\b[C]: 等待主从初始化";
+                usleep(100);
+                if(p_share_data->host_pid != -1 && p_share_data->slave_pid != -1){
+                    std::cout<<"\b[C]: 初始化完成"<<std::endl;
+                    p_share_data->status = READY;
+                    break;
+                }
+            }
+        }).detach();
+        std::cout<<"host pid: "<<p_share_data->host_pid<<std::endl;
+        std::cout<<"slave pid: "<<p_share_data->slave_pid<<std::endl;
+        p_share_data->host_pid = getpid();
     }
 
     ShareMemory::~ShareMemory() {
-        cout<<"析构函数执行"<<endl;
         DestroyShare();
+    }
+
+    int ShareMemory::SlaveCreateShare(key_t share_key){
+        CreateShare(share_key);
+        p_share_data->slave_pid = getpid();
     }
 
     int ShareMemory::CreateShare(key_t share_key) {
@@ -24,60 +43,64 @@ namespace ShareMem{
         // 3.将数据结构指向共享内存地址
         p_share_data = (ShareData *)share_memory_address;
         std::cout<<"共享内存地址 ： "<<(int *)(share_memory_address)<<std::endl;
+
         return 1;
     }
 
     int ShareMemory::DestroyShare() const {
         shmdt(share_memory_address);    // 断开映射 ，保证下次访问不被占用
         shmctl(share_memory_id, IPC_RMID, nullptr); // 释放共享内存地址
-        cout<<"共享内存已经销毁"<<endl;
+        cout<<"\b[C]: 共享内存已经销毁";
         return 1;
     }
 
-    int ShareMemory::PutShareBody(u_char *data_ptr, unsigned long data_size) const {
-        if(p_share_data->flag == CAN_WRITE){
-            if(data_ptr == nullptr){
-                std::cout<<"图片数据不存在"<<std::endl;
-                return 0;
+    std::string ShareMemory::CallSlave() {
+        // 发送信号通知从进程传输完成，开始执行计算
+        kill(p_share_data->slave_pid, WORK_IT_OUT);
+        // 等待从进程执行完成
+        while(p_share_data->status != READY){
+            std::cout<<"[C]: 等待从进程处理数据"<<std::endl;
+            if (p_share_data->status == JOB_DONE) {
+                memccpy(response, p_share_data->response, '\0', 1024);
             }
-
-            p_share_data->data_size = data_size;
-            memcpy(p_share_data->data_body, data_ptr, data_size);
-
-            // 共享内存状态修改为可读
-            p_share_data->flag = CAN_READ;
-
-            return 1;
-        }else{
-            return 0;
         }
+        p_share_data->status = READY;
+        return response;
     }
 
-    int ShareMemory::GetShareBody(ShareData *recv_ptr) const {
-        if(p_share_data->flag == CAN_READ){
-
-            memcpy(recv_ptr, p_share_data, p_share_data->data_size);
-
-            p_share_data->flag = CAN_WRITE;
-
-            return 1;
-        }else{
+    int ShareMemory::WriteData(u_char *data_ptr, unsigned long data_size, size_t offset, int multi_threads) const {
+        if(p_share_data->status != READY){
             return 0;
         }
+
+        auto start_address = p_share_data->data_body + offset; // 写入起始地址
+        p_share_data->data_size += data_size;
+
+        unsigned long extra_size = data_size % multi_threads; // 剩余的数据大小
+
+        size_t block_size = data_size / multi_threads; // 每个线程写入的数据大小
+
+        // 使用多线程写入数据
+        for (int i = 0; i < multi_threads; i++) {
+            std::thread([&]() {
+                memcpy(start_address + i * block_size, data_ptr + i * block_size, data_size / multi_threads);
+            }).detach();
+        }
+        if (extra_size > 0) {
+            std::thread([&]() {
+                memcpy(start_address + multi_threads * block_size, data_ptr + multi_threads * block_size, extra_size);
+            }).detach();
+        }
+
+        return 1;
     }
 
     u_char *ShareMemory::GetShareBodyAddress() const {
-        if(p_share_data->flag == CAN_READ){
-            return (u_char*)p_share_data->data_body;
-        }
-    }
-
-    int ShareMemory::FlagStatus() const {
-        return p_share_data->flag;
+        return (u_char*)p_share_data->data_body;
     }
 
     int ShareMemory::SetStatus(int value) const {
-        p_share_data->flag =value;
+        p_share_data->status =value;
     }
 
     ShareData *ShareMemory::ShareMemoryPtr() const {
@@ -89,17 +112,19 @@ namespace ShareMem{
     }
 
     unsigned long ShareMemory::GetShareBodySize() const {
-        if (p_share_data->flag == CAN_READ){
-            return p_share_data->data_size;
-        }else{
-            return 0;
-        }
+        return p_share_data->data_size;
     }
 
     int ShareMemory::SetShareHead(unsigned long rows, unsigned long cols) const {
         p_share_data->rows = rows;
         p_share_data->cols = cols;
         return 0;
+    }
+
+    int ShareMemory::WriteResult(u_char *result_ptr) const {
+        memccpy(p_share_data->response, result_ptr, '\0', 1024);
+        p_share_data->status = JOB_DONE;
+        return 1;
     }
 
 
@@ -116,35 +141,31 @@ extern "C" {
 ShareMem::ShareMemory useShare('.');
 
 int create_share(key_t share_key) {
-    useShare.CreateShare(share_key);
+    useShare.SlaveCreateShare(share_key);
 }
 
 int destroy_share(){
     useShare.DestroyShare();
 }
 
-int put_body(u_char *data_ptr, unsigned long data_size) {
-    useShare.PutShareBody(data_ptr, data_size);
-}
-
 u_char* get_share_body_address(){
     return useShare.GetShareBodyAddress();
+}
+
+int write_result(u_char *result_ptr){
+    return useShare.WriteResult(result_ptr);
 }
 
 unsigned long get_share_body_size(){
     return useShare.GetShareBodySize();
 }
 
-int flag_status(){
-    useShare.FlagStatus();
+int set_status_done() {
+    useShare.SetStatus(JOB_DONE);
 }
 
-int set_flag_can_read(){
-    useShare.SetStatus(CAN_READ);
-}
-
-int set_flag_can_write() {
-    useShare.SetStatus(CAN_WRITE);
+int set_status_working() {
+    useShare.SetStatus(WORKING);
 }
 
 unsigned long get_img_rows() {

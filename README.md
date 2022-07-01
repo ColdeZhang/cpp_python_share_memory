@@ -21,7 +21,7 @@
 
 ![image-20220629164418833](https://s2.loli.net/2022/06/29/W5smZ7wUlvqL1eh.png)
 
-兼容 c++与python、c++与c++、python与python 任意 一对一、一对多、多对多 之间的跨进程大容量数据传输（多方同时数据交互需要自定义好传输规则、避免内存竞争数据损坏）。
+兼容 c++与python、c++与c++、python与python 任意 一对一 之间的跨进程大容量数据传输。
 
 ## 使用方法
 
