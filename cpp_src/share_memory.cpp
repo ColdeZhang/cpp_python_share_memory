@@ -8,30 +8,30 @@ namespace ShareMem{
 
     ShareMemory::ShareMemory(key_t share_key){
         CreateShare(share_key);
+
+        p_share_data->host_pid = getpid();
+        p_share_data->slave_pid = getpid();
+
         // 开辟一个独立线程等待初始化完成
         std::thread([this](){
+            std::cout<<"[C]: 等待微服务初始化..."<<std::endl;
             while(true){
-                std::cout<<"\b[C]: 等待主从初始化";
                 usleep(100);
-                if(p_share_data->host_pid != -1 && p_share_data->slave_pid != -1){
-                    std::cout<<"\b[C]: 初始化完成"<<std::endl;
+                if(p_share_data->host_pid != p_share_data->slave_pid){
+                    std::cout<<"[C]: 初始化完成 | host_pid: "<<p_share_data->host_pid<<" | slave_pid: "<<p_share_data->slave_pid<<std::endl;
                     p_share_data->status = READY;
                     break;
                 }
             }
         }).detach();
-        std::cout<<"host pid: "<<p_share_data->host_pid<<std::endl;
-        std::cout<<"slave pid: "<<p_share_data->slave_pid<<std::endl;
-        p_share_data->host_pid = getpid();
     }
 
     ShareMemory::~ShareMemory() {
         DestroyShare();
     }
 
-    int ShareMemory::SlaveCreateShare(key_t share_key){
-        CreateShare(share_key);
-        p_share_data->slave_pid = getpid();
+    int ShareMemory::RegisterSlavePid(key_t slave_pid){
+        p_share_data->slave_pid = slave_pid;
     }
 
     int ShareMemory::CreateShare(key_t share_key) {
@@ -42,7 +42,7 @@ namespace ShareMem{
         share_memory_address = shmat(share_memory_id, (void*)nullptr, 0);//如果创建一个函数每次调用都执行，需要执行完释放一下shmdt
         // 3.将数据结构指向共享内存地址
         p_share_data = (ShareData *)share_memory_address;
-        std::cout<<"共享内存地址 ： "<<(int *)(share_memory_address)<<std::endl;
+        std::cout<<"[C]: 共享内存地址 - "<<(int *)(share_memory_address)<<std::endl;
 
         return 1;
     }
@@ -50,18 +50,22 @@ namespace ShareMem{
     int ShareMemory::DestroyShare() const {
         shmdt(share_memory_address);    // 断开映射 ，保证下次访问不被占用
         shmctl(share_memory_id, IPC_RMID, nullptr); // 释放共享内存地址
-        cout<<"\b[C]: 共享内存已经销毁";
+        std::cout<<"[C]: 共享内存已经销毁"<<std::endl;
         return 1;
     }
 
     std::string ShareMemory::CallSlave() {
+        char response[1024];
         // 发送信号通知从进程传输完成，开始执行计算
         kill(p_share_data->slave_pid, WORK_IT_OUT);
         // 等待从进程执行完成
-        while(p_share_data->status != READY){
-            std::cout<<"[C]: 等待从进程处理数据"<<std::endl;
+        std::cout<<"[C]: 已通知微服务开始处理数据，等待微服务返回结果..."<<std::endl;
+        while(true){
+            this_thread::sleep_for(chrono::microseconds(10));
             if (p_share_data->status == JOB_DONE) {
+                std::cout<<"[C]: 监测到数据处理完成，开始回收结果..."<<std::endl;
                 memccpy(response, p_share_data->response, '\0', 1024);
+                break;
             }
         }
         p_share_data->status = READY;
@@ -80,17 +84,27 @@ namespace ShareMem{
 
         size_t block_size = data_size / multi_threads; // 每个线程写入的数据大小
 
-        // 使用多线程写入数据
+        //memcpy(p_share_data->data_body, data_ptr, data_size);
+
         for (int i = 0; i < multi_threads; i++) {
-            std::thread([&]() {
-                memcpy(start_address + i * block_size, data_ptr + i * block_size, data_size / multi_threads);
-            }).detach();
+            pool.commit(std::mem_fn(&ShareMemory::copy_data), this,
+                                   start_address + i * block_size,
+                                   block_size,
+                                   data_ptr + i * block_size);
         }
-        if (extra_size > 0) {
-            std::thread([&]() {
-                memcpy(start_address + multi_threads * block_size, data_ptr + multi_threads * block_size, extra_size);
-            }).detach();
-        }
+
+
+//        // 使用多线程写入数据
+//        for (int i = 0; i < multi_threads; i++) {
+//            std::thread([&]() {
+//                memcpy(start_address + i * block_size, data_ptr + i * block_size, block_size);
+//            });
+//        }
+//        if (extra_size > 0) {
+//            std::thread([&]() {
+//                memcpy(start_address + multi_threads * block_size, data_ptr + multi_threads * block_size, extra_size);
+//            });
+//        }
 
         return 1;
     }
@@ -100,7 +114,7 @@ namespace ShareMem{
     }
 
     int ShareMemory::SetStatus(int value) const {
-        p_share_data->status =value;
+        p_share_data->status = value;
     }
 
     ShareData *ShareMemory::ShareMemoryPtr() const {
@@ -123,8 +137,11 @@ namespace ShareMem{
 
     int ShareMemory::WriteResult(u_char *result_ptr) const {
         memccpy(p_share_data->response, result_ptr, '\0', 1024);
-        p_share_data->status = JOB_DONE;
         return 1;
+    }
+
+    void ShareMemory::copy_data(char *start_ptr, size_t data_size, u_char *data_ptr) {
+        memcpy(start_ptr, data_ptr, data_size);
     }
 
 
@@ -140,8 +157,9 @@ extern "C" {
 
 ShareMem::ShareMemory useShare('.');
 
-int create_share(key_t share_key) {
-    useShare.SlaveCreateShare(share_key);
+int create_share(key_t share_key, pid_t slave_pid) {
+    useShare.CreateShare(share_key);
+    useShare.RegisterSlavePid(slave_pid);
 }
 
 int destroy_share(){

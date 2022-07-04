@@ -15,24 +15,129 @@
 #include <string>
 #include <csignal>
 #include <thread>
+#include <future>
+#include <queue>
 
 using namespace std;
 
 #define SHARE_MEMORY_SIZE (640 * 640 * 3 * 16)  // 共享内存最大容量
 
-#define READY 0         // 准备好进行新一轮的数据传输
-#define WORKING 1       // 正在处理数据中
-#define JOB_DONE 2    // 结果在内存中
+#define READY 2         // 准备好进行新一轮的数据传输
+#define WORKING 3       // 正在处理数据中
+#define JOB_DONE 4    // 结果在内存中
 
 #define WORK_IT_OUT SIGUSR1 // 通知从进程开始计算
+
+/// <summary>
+/// 用于提前分配线程，支持任意任务提交，任意返回值类型，处理那些一定有返回的任务
+/// 执行任务不能为死循环
+/// </summary>
+#define THREADPOOL_MAX_NUM 4
+
+class ThreadPool
+{
+protected:
+    using Task = function<void()>;	//定义类型
+    vector<thread> _pool;		    //线程池
+    queue<Task> _tasks;             //任务队列
+    mutex _lock;                    //同步
+    condition_variable _task_cv;    //条件阻塞
+    atomic<bool> _run{ true };      //线程池是否执行
+    atomic<int>  _idlThrNum{ 0 };   //空闲线程数量
+
+public:
+
+    inline ThreadPool(unsigned short size = 4) {
+        addThread(size);
+    }
+
+    inline ~ThreadPool()
+    {
+        _run = false;
+        _task_cv.notify_all(); // 唤醒所有线程执行
+        for (thread& thread : _pool) {
+            //thread.detach(); // 让线程“自生自灭”
+            if (thread.joinable())
+                thread.join(); // 等待任务结束， 前提：线程一定会执行完
+        }
+    }
+
+public:
+    // 提交一个任务
+    // 调用.get()获取返回值会等待任务执行完,获取返回值
+    // 有两种方法可以实现调用类成员，
+    // 一种是使用   bind： .commit(std::bind(&Dog::sayHello, &dog));
+    // 一种是用   mem_fn： .commit(std::mem_fn(&Dog::sayHello), this)
+    template<class F, class... Args>
+    auto commit(F&& f, Args&&... args) ->future<decltype(f(args...))>
+    {
+        if (!_run)    // stoped ??
+            throw runtime_error("commit on ThreadPool is stopped.");
+
+        using RetType = decltype(f(args...)); // typename std::result_of<F(Args...)>::type, 函数 f 的返回值类型
+        auto task = make_shared<packaged_task<RetType()>>(
+                bind(forward<F>(f), forward<Args>(args)...)
+        ); // 把函数入口及参数,打包(绑定)
+        future<RetType> future = task->get_future();
+        {    // 添加任务到队列
+            lock_guard<mutex> lock{ _lock };//对当前块的语句加锁  lock_guard 是 mutex 的 stack 封装类，构造的时候 lock()，析构的时候 unlock()
+            _tasks.emplace([task]() { // push(Task{...}) 放到队列后面
+                (*task)();
+            });
+        }
+#ifdef THREADPOOL_AUTO_GROW
+        if (_idlThrNum < 1 && _pool.size() < THREADPOOL_MAX_NUM)
+			addThread(1);
+#endif // !THREADPOOL_AUTO_GROW
+        _task_cv.notify_one(); // 唤醒一个线程执行
+
+        return future;
+    }
+
+    //空闲线程数量
+    int idlCount() { return _idlThrNum; }
+    //线程数量
+    int thrCount() { return _pool.size(); }
+#ifndef THREADPOOL_AUTO_GROW
+private:
+#endif // !THREADPOOL_AUTO_GROW
+    //添加指定数量的线程
+    void addThread(unsigned short size)
+    {
+        for (; _pool.size() < THREADPOOL_MAX_NUM && size > 0; --size)
+        {   //增加线程数量,但不超过 预定义数量 THREADPOOL_MAX_NUM
+            _pool.emplace_back([this] { //工作线程函数
+                while (_run)
+                {
+                    Task task; // 获取一个待执行的 task
+                    {
+                        // unique_lock 相比 lock_guard 的好处是：可以随时 unlock() 和 lock()
+                        unique_lock<mutex> lock{ _lock };
+                        _task_cv.wait(lock, [this] {
+                            return !_run || !_tasks.empty();
+                        }); // wait 直到有 task
+                        if (!_run && _tasks.empty())
+                            return;
+                        task = move(_tasks.front()); // 按先进先出从队列取一个 task
+                        _tasks.pop();
+                    }
+                    _idlThrNum--;
+                    task();//执行任务
+                    _idlThrNum++;
+                }
+            });
+            _idlThrNum++;
+        }
+    }
+};
 
 namespace ShareMem{
 
     //共享内存-数据结构
     struct ShareData{
         // head - 一些固定不变的常量
-        pid_t host_pid = -1;        // 主进程pid
-        pid_t slave_pid = -1;       // 从进程pid
+        pid_t host_pid = 0;        // 主进程pid
+        pid_t slave_pid = 0;       // 从进程pid
         unsigned long rows = 640;   // 图像高
         unsigned long cols = 640;   // 图像宽
 
@@ -52,10 +157,10 @@ namespace ShareMem{
         void *share_memory_address = nullptr;   // 映射共享内存地址  share_memory_address指针记录了起始地址
         ShareData *p_share_data = nullptr;  // 以ShareData结构体类型-访问共享内存
 
-        char response[1024]{};
         //未来加速 可以搞一个图像队列 队列大小3  不停存图，然后挨着丢进共享内存，满了就清除。
         //vector<ShareData> share_data_queue;
 
+        ThreadPool pool;
     public:
 
         /*!
@@ -75,12 +180,11 @@ namespace ShareMem{
         ~ShareMemory();
 
         /*!
-         * @brief 从进程创建共享内存
-         * @details 并将从进程的pid保存进共享内存
-         * @param share_key 共享内存地址标识
+         * @brief 从进程调用写入从进程的pid
+         * @param slave_pid 从进程传入自身的pid
          * @return
          */
-        int SlaveCreateShare(key_t share_key);
+        int RegisterSlavePid(key_t slave_pid);
 
         /*!
          * @brief 销毁共享内存
@@ -148,7 +252,6 @@ namespace ShareMem{
          */
         ShareData *ShareMemoryPtr() const;
 
-    private:
         /*!
          * @brief 创建共享内存
          * @param share_key 共享内存地址标识
@@ -156,8 +259,12 @@ namespace ShareMem{
          */
         int CreateShare(key_t share_key);
 
+    public:
+        void copy_data(char *start_ptr, unsigned long data_size, u_char *data_ptr);
     };
 
 }
+
+
 
 #endif //CPP_PYTHON_SHARE_MEMORY_H

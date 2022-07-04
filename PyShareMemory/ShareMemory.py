@@ -18,24 +18,31 @@ except Exception as e:
     exit(1)
 
 
-class ShareMemory(object):
-    work: callable
+def blank_work():
+    return "Null"
 
-    def __init__(self, share_memory_key: int):
-        share.create_share(share_memory_key)
+
+class ShareMemory(object):
+    work = blank_work()
+
+    def __init__(self, share_memory_key: int, slave_pid: int):
+        share.create_share(share_memory_key, slave_pid)
         signal.signal(signal.SIGUSR1, self.job)
         pass
 
-    def do(self, job: callable):
-        self.work = job
+    def do(self, work_to_do):
+        self.work = work_to_do
 
-    def job(self):
-        self.set_share_working()
+    def job(self, signum, frame):
+        share.set_status_working()
+        print('[Python]: 接收到传输完成的信号，开始处理...')
         data = self.get_data()
         res = self.work(data)
-        self.write_result(res)
-        self.set_share_done()
-
+        print('[Python]: 处理完成，开始向内存写入结果')
+        share.write_result(ctypes.c_char_p(res.encode('utf-8')))
+        share.set_status_done()
+        print('[Python]: 写入结束，内存标志位已修改为JOB_DONE')
+        print('[Python]: 本次任务结束。')
 
     def get_share_body_size(self):
         return share.get_share_body_size()
@@ -43,44 +50,30 @@ class ShareMemory(object):
     """
     从共享内存中获取数据
     """
+
     def get_data(self):
         share_body_ptr = share.get_share_body_address()
         py_data_recv = ctypes.cast(share_body_ptr, ctypes.POINTER(ctypes.c_uint8 * self.get_share_body_size())).contents
         return py_data_recv
 
     """
-    向共享内存中写入数据
-    """
-    def write_result(self, data):
-        share.write_result(data.ctypes.data_as(ctypes.c_char_p))
-
-    """
     获取共享内存里图片高
     """
+
     def get_height(self):
         return share.get_img_rows()
 
     """
     获取共享内存里图片宽
     """
+
     def get_width(self):
         return share.get_img_cols()
 
     """
-    设置内存状态为任务完成
-    """
-    def set_share_done(self):
-        share.set_status_done()
-
-    """
-    设置状态为处理任务中
-    """
-    def set_share_working(self):
-        share.set_status_working()
-
-    """
     销毁共享内存
     """
+
     def destroy_share(self):
         share.destroy_share()
 

@@ -25,12 +25,15 @@ int main( int argc, char** argv ){
     auto image_size = Img.cols * Img.rows * Img.channels();
     std::cout << "图片大小: " << image_size << std::endl;
 
-    ShareMem::ShareMemory ShareImpl(12111);
+    ShareMem::ShareMemory ShareImpl(13);
     ShareImpl.SetShareHead(Img.rows, Img.cols);
 
     auto time_start =  system_clock::now();   // 开始计时
     auto time_end = system_clock::now();    // 结束计时
     double time_send_total = 0;   // 发送总时间
+
+    while (ShareImpl.ShareMemoryPtr()->status != READY){
+    }
 
     std::cout << "=========开始传输数据=========" << std::endl;
 
@@ -44,7 +47,8 @@ int main( int argc, char** argv ){
         ShareImpl.WriteData((u_char*)Img.data, image_size, 0, threads_);
         auto time_end_cpy = system_clock::now();
         time_send_total += GetSpan(time_start_cpy, time_end_cpy);
-        std::cout<<ShareImpl.CallSlave()<<std::endl;
+
+        std::cout<<"[main-结果]: "<<ShareImpl.CallSlave()<<std::endl;
     }
     time_end = system_clock::now();    // 结束计时
 

@@ -5,13 +5,16 @@ import time
 import os
 import cv2
 
-share = ShareMemory(12111)
+pid = os.getpid()
 
-i = 0
-while True:
-    try:
-        share.do(lambda data: "success")
-    except Exception as e:
-        print(e)
-        share.destroy_share()
-        break
+share = ShareMemory(13, pid)
+
+def some_ai(data):
+    # time.sleep(10)
+    print("[Python]: some_ai worked it out!!")
+    return "success"
+
+share.do(some_ai)
+
+
+input("[Python]: 程序运行中，按回车退出...\n")

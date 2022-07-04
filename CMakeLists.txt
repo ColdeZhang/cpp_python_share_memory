@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 project(cpp_python)
-set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD 17)
 
 link_directories(external/opencv_build/lib64)
 
@@ -13,7 +13,7 @@ find_package(OpenCV REQUIRED)
 
 add_executable(cpp_python test.cpp cpp_src/share_memory.cpp cpp_src/share_memory.h)
 
-add_library(sharememory SHARED src/share_memory.h src/share_memory.cpp)
+add_library(sharememory SHARED cpp_src/share_memory.h cpp_src/share_memory.cpp)
 
 target_link_directories(cpp_python
         PRIVATE external/opencv_build/lib64)
