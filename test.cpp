@@ -1,6 +1,7 @@
 #include <iostream>
 #include "cpp_src/share_memory.h"
 #include <opencv2/core/core.hpp>
+#include <opencv2/opencv.hpp>
 #include <ctime>
 #include <chrono>
 
@@ -20,13 +21,13 @@ int main( int argc, char** argv ){
     std::cout << "图片尺寸: " << img_rows << "*" << img_cols << std::endl;
     std::cout << "测试数量: " << img_nums << std::endl;
 
-    //cv::Mat Img = cv::imread(argv[2],cv::IMREAD_COLOR);
+    //cv::Mat Img = cv::imread("../01.png",cv::IMREAD_COLOR);
     cv::Mat Img = cv::Mat(img_rows, img_cols, CV_8UC3, cv::Scalar(0, 255, 0));
     auto image_size = Img.cols * Img.rows * Img.channels();
     std::cout << "图片大小: " << image_size << std::endl;
 
-    ShareMem::ShareMemory ShareImpl(13);
-    ShareImpl.SetShareHead(Img.rows, Img.cols);
+    ShareMem::ShareMemory ShareImpl(2615);
+    ShareImpl.SetShareHead(Img.rows, Img.cols, Img.channels());
 
     auto time_start =  system_clock::now();   // 开始计时
     auto time_end = system_clock::now();    // 结束计时

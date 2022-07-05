@@ -19,7 +19,7 @@ except Exception as e:
 
 
 def blank_work():
-    return "Null"
+    return "[来自Python的信息]: Null，没有传入工作函数！"
 
 
 class ShareMemory(object):
@@ -37,44 +37,33 @@ class ShareMemory(object):
         share.set_status_working()
         print('[Python]: 接收到传输完成的信号，开始处理...')
         data = self.get_data()
-        res = self.work(data)
+        res = self.work(data, self.get_width(), self.get_height())
         print('[Python]: 处理完成，开始向内存写入结果')
         share.write_result(ctypes.c_char_p(res.encode('utf-8')))
         share.set_status_done()
         print('[Python]: 写入结束，内存标志位已修改为JOB_DONE')
         print('[Python]: 本次任务结束。')
 
+    # 获取数据总大小
     def get_share_body_size(self):
         return share.get_share_body_size()
 
-    """
-    从共享内存中获取数据
-    """
-
+    # 从共享内存中获取数据
     def get_data(self):
         share_body_ptr = share.get_share_body_address()
         py_data_recv = ctypes.cast(share_body_ptr, ctypes.POINTER(ctypes.c_uint8 * self.get_share_body_size())).contents
         return py_data_recv
 
-    """
-    获取共享内存里图片高
-    """
-
+    # 获取图片的高
     def get_height(self):
         return share.get_img_rows()
 
-    """
-    获取共享内存里图片宽
-    """
-
+    # 获取图片的宽
     def get_width(self):
         return share.get_img_cols()
 
-    """
-    销毁共享内存
-    """
-
-    def destroy_share(self):
-        share.destroy_share()
+    # 获取图片通道
+    def get_chanel(self):
+        return share.get_img_channels()
 
     pass

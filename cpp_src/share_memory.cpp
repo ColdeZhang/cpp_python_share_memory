@@ -8,9 +8,10 @@ namespace ShareMem{
 
     ShareMemory::ShareMemory(key_t share_key){
         CreateShare(share_key);
-
+        pool.init();    // 初始化线程池
         p_share_data->host_pid = getpid();
         p_share_data->slave_pid = getpid();
+        p_share_data->data_size = 0;
 
         // 开辟一个独立线程等待初始化完成
         std::thread([this](){
@@ -47,10 +48,11 @@ namespace ShareMem{
         return 1;
     }
 
-    int ShareMemory::DestroyShare() const {
+    int ShareMemory::DestroyShare(){
         shmdt(share_memory_address);    // 断开映射 ，保证下次访问不被占用
         shmctl(share_memory_id, IPC_RMID, nullptr); // 释放共享内存地址
         std::cout<<"[C]: 共享内存已经销毁"<<std::endl;
+        pool.shutdown(); // 关闭线程池
         return 1;
     }
 
@@ -68,16 +70,19 @@ namespace ShareMem{
                 break;
             }
         }
+        p_share_data->data_size = 0;
         p_share_data->status = READY;
         return response;
     }
 
-    int ShareMemory::WriteData(u_char *data_ptr, unsigned long data_size, size_t offset, int multi_threads) const {
+    int ShareMemory::WriteData(u_char *data_ptr, unsigned long data_size, size_t offset, int multi_threads){
         if(p_share_data->status != READY){
             return 0;
         }
+        if (multi_threads > 4) multi_threads = 4;
 
         auto start_address = p_share_data->data_body + offset; // 写入起始地址
+
         p_share_data->data_size += data_size;
 
         unsigned long extra_size = data_size % multi_threads; // 剩余的数据大小
@@ -86,14 +91,16 @@ namespace ShareMem{
 
         //memcpy(p_share_data->data_body, data_ptr, data_size);
 
+        vector<std::future<int>> res;
         for (int i = 0; i < multi_threads; i++) {
-            pool.commit(std::mem_fn(&ShareMemory::copy_data), this,
-                                   start_address + i * block_size,
-                                   block_size,
-                                   data_ptr + i * block_size);
+            auto re = pool.submit(ShareMemory::copy_data,
+                                  start_address + i * block_size,
+                                  block_size,
+                                  data_ptr + i * block_size);
+            res.push_back(std::move(re));
         }
-
-
+        // 等待传输任务完成
+        res.back().get();
 //        // 使用多线程写入数据
 //        for (int i = 0; i < multi_threads; i++) {
 //            std::thread([&]() {
@@ -129,19 +136,14 @@ namespace ShareMem{
         return p_share_data->data_size;
     }
 
-    int ShareMemory::SetShareHead(unsigned long rows, unsigned long cols) const {
-        p_share_data->rows = rows;
-        p_share_data->cols = cols;
-        return 0;
-    }
-
     int ShareMemory::WriteResult(u_char *result_ptr) const {
         memccpy(p_share_data->response, result_ptr, '\0', 1024);
         return 1;
     }
 
-    void ShareMemory::copy_data(char *start_ptr, size_t data_size, u_char *data_ptr) {
+    int ShareMemory::copy_data(char *start_ptr, size_t data_size, u_char *data_ptr) {
         memcpy(start_ptr, data_ptr, data_size);
+        return 1;
     }
 
 
@@ -192,6 +194,10 @@ unsigned long get_img_rows() {
 
 unsigned long get_img_cols() {
     return useShare.ShareMemoryPtr()->cols;
+}
+
+unsigned long get_img_channels() {
+    return useShare.ShareMemoryPtr()->channels;
 }
 
 }
