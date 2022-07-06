@@ -10,15 +10,16 @@ namespace ShareMem{
         CreateShare(share_key);
         pool.init();    // 初始化线程池
         p_share_data->host_pid = getpid();
-        p_share_data->slave_pid = getpid();
+        p_share_data->slave_pid = 0;
         p_share_data->data_size = 0;
+        p_share_data->status = 0;
 
         // 开辟一个独立线程等待初始化完成
         std::thread([this](){
             std::cout<<"[C]: 等待微服务初始化..."<<std::endl;
             while(true){
                 usleep(100);
-                if(p_share_data->host_pid != p_share_data->slave_pid){
+                if(0 != p_share_data->slave_pid){
                     std::cout<<"[C]: 初始化完成 | host_pid: "<<p_share_data->host_pid<<" | slave_pid: "<<p_share_data->slave_pid<<std::endl;
                     p_share_data->status = READY;
                     break;
@@ -57,7 +58,9 @@ namespace ShareMem{
     }
 
     std::string ShareMemory::CallSlave() {
-        char response[1024];
+        // 确保所有传输任务完成
+        write_task_list.back().get();
+        char response[RESPONSE_SIZE];
         // 发送信号通知从进程传输完成，开始执行计算
         kill(p_share_data->slave_pid, WORK_IT_OUT);
         // 等待从进程执行完成
@@ -66,11 +69,12 @@ namespace ShareMem{
             this_thread::sleep_for(chrono::microseconds(10));
             if (p_share_data->status == JOB_DONE) {
                 std::cout<<"[C]: 监测到数据处理完成，开始回收结果..."<<std::endl;
-                memccpy(response, p_share_data->response, '\0', 1024);
+                memccpy(response, p_share_data->response, '\0', RESPONSE_SIZE);
                 break;
             }
         }
         p_share_data->data_size = 0;
+        write_task_list.clear();
         p_share_data->status = READY;
         return response;
     }
@@ -91,16 +95,14 @@ namespace ShareMem{
 
         //memcpy(p_share_data->data_body, data_ptr, data_size);
 
-        vector<std::future<int>> res;
+
         for (int i = 0; i < multi_threads; i++) {
             auto re = pool.submit(ShareMemory::copy_data,
                                   start_address + i * block_size,
                                   block_size,
                                   data_ptr + i * block_size);
-            res.push_back(std::move(re));
+            write_task_list.push_back(std::move(re));
         }
-        // 等待传输任务完成
-        res.back().get();
 //        // 使用多线程写入数据
 //        for (int i = 0; i < multi_threads; i++) {
 //            std::thread([&]() {
@@ -137,7 +139,7 @@ namespace ShareMem{
     }
 
     int ShareMemory::WriteResult(u_char *result_ptr) const {
-        memccpy(p_share_data->response, result_ptr, '\0', 1024);
+        memccpy(p_share_data->response, result_ptr, '\0', RESPONSE_SIZE);
         return 1;
     }
 

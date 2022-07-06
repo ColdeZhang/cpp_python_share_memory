@@ -17,10 +17,12 @@
 #include <thread>
 #include <future>
 #include <queue>
+#include <functional>
 
 using namespace std;
 
 #define SHARE_MEMORY_SIZE (640*640*3*100)  // 共享内存最大容量
+#define RESPONSE_SIZE (1024*20)
 
 #define READY 2         // 准备好进行新一轮的数据传输
 #define WORKING 3       // 正在处理数据中
@@ -174,7 +176,7 @@ namespace ShareMem{
         int status = -1;                          // 标志位
         unsigned long data_size = 0;            // 数据实际大小，用于确定读取量
         char data_body[SHARE_MEMORY_SIZE];      // 共享内存里的数据体
-        char response[1024];                    // 响应数据
+        char response[RESPONSE_SIZE];                    // 响应数据
 
         // pid信息
         pid_t host_pid = 0;        // 主进程pid
@@ -207,6 +209,7 @@ namespace ShareMem{
         //vector<ShareData> share_data_queue;
 
         ThreadsPool::ThreadsPool pool;
+        vector<std::future<int>> write_task_list;
     public:
 
         /*!

@@ -1739,8 +1739,8 @@ Mat_<_Tp>::operator Matx<typename DataType<_Tp>::channel_type, m, n>() const
 
 #if defined _MSC_VER
     const Mat* pMat = (const Mat*)this; // workaround for MSVS <= 2012 compiler bugs (but GCC 4.6 dislikes this workaround)
-    Matx<typename DataType<_Tp>::channel_type, m, n> res = pMat->operator Matx<typename DataType<_Tp>::channel_type, m, n>();
-    return res;
+    Matx<typename DataType<_Tp>::channel_type, m, n> write_task_list = pMat->operator Matx<typename DataType<_Tp>::channel_type, m, n>();
+    return write_task_list;
 #else
     Matx<typename DataType<_Tp>::channel_type, m, n> res = this->Mat::operator Matx<typename DataType<_Tp>::channel_type, m, n>();
     return res;

@@ -87,19 +87,19 @@
   #elif defined __GNUC__ && defined __arm__ && (defined __ARM_PCS_VFP || defined __ARM_VFPV3__ || defined __ARM_NEON__) && !defined __SOFTFP__
     // 1. general scheme
     #define ARM_ROUND(_value, _asm_string) \
-        int res; \
+        int write_task_list; \
         float temp; \
         CV_UNUSED(temp); \
-        __asm__(_asm_string : [res] "=r" (res), [temp] "=w" (temp) : [value] "w" (_value)); \
-        return res
+        __asm__(_asm_string : [write_task_list] "=r" (write_task_list), [temp] "=w" (temp) : [value] "w" (_value)); \
+        return write_task_list
     // 2. version for double
     #ifdef __clang__
-        #define CV_INLINE_ROUND_DBL(value) ARM_ROUND(value, "vcvtr.s32.f64 %[temp], %[value] \n vmov %[res], %[temp]")
+        #define CV_INLINE_ROUND_DBL(value) ARM_ROUND(value, "vcvtr.s32.f64 %[temp], %[value] \n vmov %[write_task_list], %[temp]")
     #else
-        #define CV_INLINE_ROUND_DBL(value) ARM_ROUND(value, "vcvtr.s32.f64 %[temp], %P[value] \n vmov %[res], %[temp]")
+        #define CV_INLINE_ROUND_DBL(value) ARM_ROUND(value, "vcvtr.s32.f64 %[temp], %P[value] \n vmov %[write_task_list], %[temp]")
     #endif
     // 3. version for float
-    #define CV_INLINE_ROUND_FLT(value) ARM_ROUND(value, "vcvtr.s32.f32 %[temp], %[value]\n vmov %[res], %[temp]")
+    #define CV_INLINE_ROUND_FLT(value) ARM_ROUND(value, "vcvtr.s32.f32 %[temp], %[value]\n vmov %[write_task_list], %[temp]")
   #elif defined __PPC64__ && defined __GNUC__ && defined _ARCH_PWR8
     // P8 and newer machines can convert fp32/64 to int quickly.
     #define CV_INLINE_ROUND_DBL(value) \
